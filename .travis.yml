@@ -165,7 +165,7 @@ script:
   - make
   - ./osrm-example ../../test/data/berlin-latest.osrm
   # build node-osrm
-  - cd ../platform/node
+  - cd ../../platform/node
   - ./scripts/install_node.sh 4
   - export BASE_DIR=$(pwd)/../../
   - export PKG_CONFIG_PATH=${BASE_DIR}/build/
