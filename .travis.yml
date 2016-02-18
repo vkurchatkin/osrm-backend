@@ -172,4 +172,5 @@ script:
   - export CXXFLAGS="-I${BASE_DIR}/include -I${BASE_DIR}/third_party"
   - export LDFLAGS="-L${BASE_DIR}/build"
   - npm install --build-from-source
+  - ../../build/osrm-datastore ../../test/data/berlin-latest.osrm
   - npm test
