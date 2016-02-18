@@ -9,6 +9,7 @@ branches:
   only:
     - master
     - develop
+    - bundle
 
 matrix:
   fast_finish: true
