@@ -47,13 +47,13 @@ matrix:
     #   env: COMPILER='clang++' BUILD_TYPE='Debug'
 
     # # Release Builds
-    # - os: linux
-    #   compiler: gcc
-    #   addons: &gcc5
-    #     apt:
-    #       sources: ['ubuntu-toolchain-r-test']
-    #       packages: ['g++-5', 'libbz2-dev', 'libstxxl-dev', 'libstxxl1', 'libxml2-dev', 'libzip-dev', 'lua5.1', 'liblua5.1-0-dev', 'rubygems-integration', 'libtbb-dev', 'libgdal-dev', 'libluabind-dev', 'libboost-all-dev']
-    #   env: COMPILER='g++-5' BUILD_TYPE='Release'
+     - os: linux
+       compiler: gcc
+       addons: &gcc5
+         apt:
+           sources: ['ubuntu-toolchain-r-test']
+           packages: ['g++-5', 'libbz2-dev', 'libstxxl-dev', 'libstxxl1', 'libxml2-dev', 'libzip-dev', 'lua5.1', 'liblua5.1-0-dev', 'rubygems-integration', 'libtbb-dev', 'libgdal-dev', 'libluabind-dev', 'libboost-all-dev']
+       env: COMPILER='g++-5' BUILD_TYPE='Release'
 
     # - os: linux
     #   compiler: gcc
@@ -165,7 +165,7 @@ script:
   - make
   - ./osrm-example ../../test/data/berlin-latest.osrm
   # build node-osrm
-  - cd platform/node
+  - cd ../platform/node
   - ./scripts/install_node.sh 4
   - export BASE_DIR=$(pwd)/../../
   - export PKG_CONFIG_PATH=${BASE_DIR}/build/
