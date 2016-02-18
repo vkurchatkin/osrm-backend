@@ -163,3 +163,12 @@ script:
   - cmake ..
   - make
   - ./osrm-example ../../test/data/berlin-latest.osrm
+  # build node-osrm
+  - cd platform/node
+  - ./scripts/install_node.sh 4
+  - export BASE_DIR=$(pwd)/../../
+  - export PKG_CONFIG_PATH=${BASE_DIR}/build/
+  - export CXXFLAGS="-I${BASE_DIR}/include -I${BASE_DIR}/third_party"
+  - export LDFLAGS="-L${BASE_DIR}/build"
+  - npm install --build-from-source
+  - npm test
