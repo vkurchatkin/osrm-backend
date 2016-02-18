@@ -128,6 +128,9 @@ install:
       export PATH=${DEPS_DIR}/cmake/bin:${PATH}
 
     elif [[ "${TRAVIS_OS_NAME}" == "osx" ]]; then
+      sudo sysctl -w kern.sysv.shmmax=4294967296
+      sudo sysctl -w kern.sysv.shmall=1048576
+      sudo sysctl -w kern.sysv.shmseg=128
       brew install cmake boost libzip libstxxl libxml2 lua51 luabind tbb GDAL md5sha1sum
     fi
 
