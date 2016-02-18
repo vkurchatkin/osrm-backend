@@ -158,6 +158,7 @@ script:
   - ./engine-tests
   - ./util-tests
   - cd ..
+  - make -C test/data
   # build node-osrm
   - cd platform/node
   - ./scripts/install_node.sh 4
@@ -170,7 +171,6 @@ script:
   - npm test
   - cd ../../
   - cucumber -p verify
-  - make -C test/data
   - mkdir example/build && cd example/build
   - cmake ..
   - make
