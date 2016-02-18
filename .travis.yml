@@ -23,7 +23,7 @@ matrix:
         apt:
           sources: ['ubuntu-toolchain-r-test']
           packages: ['g++-5', 'libbz2-dev', 'libstxxl-dev', 'libstxxl1', 'libxml2-dev', 'libzip-dev', 'lua5.1', 'liblua5.1-0-dev', 'rubygems-integration', 'libtbb-dev', 'libgdal-dev', 'libluabind-dev', 'libboost-all-dev']
-      env: COMPILER='g++-5' BUILD_TYPE='Debug'
+      env: COMPILER='g++-5' BUILD_TYPE='Release'
 
     # - os: linux
     #   compiler: gcc
@@ -47,13 +47,13 @@ matrix:
     #   env: COMPILER='clang++' BUILD_TYPE='Debug'
 
     # # Release Builds
-     - os: linux
-       compiler: gcc
-       addons: &gcc5
-         apt:
-           sources: ['ubuntu-toolchain-r-test']
-           packages: ['g++-5', 'libbz2-dev', 'libstxxl-dev', 'libstxxl1', 'libxml2-dev', 'libzip-dev', 'lua5.1', 'liblua5.1-0-dev', 'rubygems-integration', 'libtbb-dev', 'libgdal-dev', 'libluabind-dev', 'libboost-all-dev']
-       env: COMPILER='g++-5' BUILD_TYPE='Release'
+    # - os: linux
+    #   compiler: gcc
+    #   addons: &gcc5
+    #     apt:
+    #       sources: ['ubuntu-toolchain-r-test']
+    #       packages: ['g++-5', 'libbz2-dev', 'libstxxl-dev', 'libstxxl1', 'libxml2-dev', 'libzip-dev', 'lua5.1', 'liblua5.1-0-dev', 'rubygems-integration', 'libtbb-dev', 'libgdal-dev', 'libluabind-dev', 'libboost-all-dev']
+    #   env: COMPILER='g++-5' BUILD_TYPE='Release'
 
     # - os: linux
     #   compiler: gcc
