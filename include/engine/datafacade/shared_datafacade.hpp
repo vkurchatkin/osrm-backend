@@ -464,7 +464,8 @@ class SharedDataFacade final : public BaseDataFacade
     NearestPhantomNodesInRange(const util::Coordinate input_coordinate,
                                const float max_distance,
                                const int bearing,
-                               const int bearing_range) override final
+                               const int bearing_range,
+                               const bool include_both_directions) override final
     {
         if (!m_static_rtree.get() || CURRENT_TIMESTAMP != m_static_rtree->first)
         {
@@ -473,7 +474,7 @@ class SharedDataFacade final : public BaseDataFacade
         }
 
         return m_geospatial_query->NearestPhantomNodesInRange(input_coordinate, max_distance,
-                                                              bearing, bearing_range);
+                                                              bearing, bearing_range, include_both_directions);
     }
 
     std::vector<PhantomNodeWithDistance>
@@ -507,7 +508,8 @@ class SharedDataFacade final : public BaseDataFacade
     NearestPhantomNodes(const util::Coordinate input_coordinate,
                         const unsigned max_results,
                         const int bearing,
-                        const int bearing_range) override final
+                        const int bearing_range,
+                        const bool include_both_directions) override final
     {
         if (!m_static_rtree.get() || CURRENT_TIMESTAMP != m_static_rtree->first)
         {
@@ -516,7 +518,7 @@ class SharedDataFacade final : public BaseDataFacade
         }
 
         return m_geospatial_query->NearestPhantomNodes(input_coordinate, max_results, bearing,
-                                                       bearing_range);
+                                                       bearing_range, include_both_directions);
     }
 
     std::vector<PhantomNodeWithDistance>
@@ -524,7 +526,8 @@ class SharedDataFacade final : public BaseDataFacade
                         const unsigned max_results,
                         const double max_distance,
                         const int bearing,
-                        const int bearing_range) override final
+                        const int bearing_range,
+                        const bool include_both_directions) override final
     {
         if (!m_static_rtree.get() || CURRENT_TIMESTAMP != m_static_rtree->first)
         {
@@ -533,7 +536,7 @@ class SharedDataFacade final : public BaseDataFacade
         }
 
         return m_geospatial_query->NearestPhantomNodes(input_coordinate, max_results, max_distance,
-                                                       bearing, bearing_range);
+                                                       bearing, bearing_range, include_both_directions);
     }
 
     std::pair<PhantomNode, PhantomNode> NearestPhantomNodeWithAlternativeFromBigComponent(
@@ -567,7 +570,8 @@ class SharedDataFacade final : public BaseDataFacade
     NearestPhantomNodeWithAlternativeFromBigComponent(const util::Coordinate input_coordinate,
                                                       const double max_distance,
                                                       const int bearing,
-                                                      const int bearing_range) override final
+                                                      const int bearing_range,
+                                                      const bool include_both_directions) override final
     {
         if (!m_static_rtree.get() || CURRENT_TIMESTAMP != m_static_rtree->first)
         {
@@ -576,13 +580,14 @@ class SharedDataFacade final : public BaseDataFacade
         }
 
         return m_geospatial_query->NearestPhantomNodeWithAlternativeFromBigComponent(
-            input_coordinate, max_distance, bearing, bearing_range);
+            input_coordinate, max_distance, bearing, bearing_range, include_both_directions);
     }
 
     std::pair<PhantomNode, PhantomNode>
     NearestPhantomNodeWithAlternativeFromBigComponent(const util::Coordinate input_coordinate,
                                                       const int bearing,
-                                                      const int bearing_range) override final
+                                                      const int bearing_range,
+                                                      const bool include_both_directions) override final
     {
         if (!m_static_rtree.get() || CURRENT_TIMESTAMP != m_static_rtree->first)
         {
@@ -591,7 +596,7 @@ class SharedDataFacade final : public BaseDataFacade
         }
 
         return m_geospatial_query->NearestPhantomNodeWithAlternativeFromBigComponent(
-            input_coordinate, bearing, bearing_range);
+            input_coordinate, bearing, bearing_range, include_both_directions);
     }
 
     unsigned GetCheckSum() const override final { return m_check_sum; }

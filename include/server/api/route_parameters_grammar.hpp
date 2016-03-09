@@ -27,7 +27,7 @@ struct RouteParametersGrammar : public BaseParametersGrammar
     using AlternativeT = bool;
     using GeometriesT = engine::api::RouteParameters::GeometriesType;
     using OverviewT = engine::api::RouteParameters::OverviewType;
-    using UturnsT = std::vector<boost::optional<bool>>;
+    using UturnsT = boost::optional<bool>;
 
     RouteParametersGrammar() : BaseParametersGrammar(root_rule, parameters)
     {
@@ -72,7 +72,7 @@ struct RouteParametersGrammar : public BaseParametersGrammar
         overview_rule = qi::lit("overview=simplified")[set_simplified_type] |
                         qi::lit("overview=full")[set_full_type] |
                         qi::lit("overview=false")[set_false_type];
-        uturns_rule = qi::lit("uturns=") >> -qi::bool_ % ";";
+        uturns_rule = qi::lit("uturns=") >> -qi::bool_;
         route_rule = steps_rule[set_steps] | alternatives_rule[set_alternatives] | geometries_rule |
                      overview_rule | uturns_rule[set_uturns];
 

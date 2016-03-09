@@ -113,7 +113,8 @@ class BasePlugin
     // Falls back to default_radius for non-set radii
     std::vector<std::vector<PhantomNodeWithDistance>>
     GetPhantomNodesInRange(const api::BaseParameters &parameters,
-                           const std::vector<double> radiuses) const
+                           const std::vector<double> radiuses,
+                           const bool include_both_directions = false) const
     {
         std::vector<std::vector<PhantomNodeWithDistance>> phantom_nodes(
             parameters.coordinates.size());
@@ -138,7 +139,7 @@ class BasePlugin
             {
                 phantom_nodes[i] = facade.NearestPhantomNodesInRange(
                     parameters.coordinates[i], radiuses[i], parameters.bearings[i]->bearing,
-                    parameters.bearings[i]->range);
+                    parameters.bearings[i]->range, include_both_directions);
             }
             else
             {
@@ -151,7 +152,8 @@ class BasePlugin
     }
 
     std::vector<std::vector<PhantomNodeWithDistance>>
-    GetPhantomNodes(const api::BaseParameters &parameters, unsigned number_of_results)
+    GetPhantomNodes(const api::BaseParameters &parameters, unsigned number_of_results,
+            const bool include_both_directions = false)
     {
         std::vector<std::vector<PhantomNodeWithDistance>> phantom_nodes(
             parameters.coordinates.size());
@@ -180,13 +182,15 @@ class BasePlugin
                 {
                     phantom_nodes[i] = facade.NearestPhantomNodes(
                         parameters.coordinates[i], number_of_results, *parameters.radiuses[i],
-                        parameters.bearings[i]->bearing, parameters.bearings[i]->range);
+                        parameters.bearings[i]->bearing, parameters.bearings[i]->range,
+                        include_both_directions);
                 }
                 else
                 {
                     phantom_nodes[i] = facade.NearestPhantomNodes(
                         parameters.coordinates[i], number_of_results,
-                        parameters.bearings[i]->bearing, parameters.bearings[i]->range);
+                        parameters.bearings[i]->bearing, parameters.bearings[i]->range,
+                        include_both_directions);
                 }
             }
             else
@@ -212,7 +216,8 @@ class BasePlugin
         return phantom_nodes;
     }
 
-    std::vector<PhantomNodePair> GetPhantomNodes(const api::BaseParameters &parameters)
+    std::vector<PhantomNodePair> GetPhantomNodes(const api::BaseParameters &parameters,
+            const bool include_both_directions = false)
     {
         std::vector<PhantomNodePair> phantom_node_pairs(parameters.coordinates.size());
 
@@ -238,14 +243,15 @@ class BasePlugin
                     phantom_node_pairs[i] =
                         facade.NearestPhantomNodeWithAlternativeFromBigComponent(
                             parameters.coordinates[i], *parameters.radiuses[i],
-                            parameters.bearings[i]->bearing, parameters.bearings[i]->range);
+                            parameters.bearings[i]->bearing, parameters.bearings[i]->range,
+                            include_both_directions);
                 }
                 else
                 {
                     phantom_node_pairs[i] =
                         facade.NearestPhantomNodeWithAlternativeFromBigComponent(
                             parameters.coordinates[i], parameters.bearings[i]->bearing,
-                            parameters.bearings[i]->range);
+                            parameters.bearings[i]->range, include_both_directions);
                 }
             }
             else
