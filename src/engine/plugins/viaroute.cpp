@@ -22,8 +22,6 @@ namespace engine
 namespace plugins
 {
 
-static const constexpr bool UTURN_DEFAULT = false;
-
 ViaRoutePlugin::ViaRoutePlugin(datafacade::BaseDataFacade &facade_, int max_locations_viaroute)
     : BasePlugin(facade_), shortest_path(&facade_, heaps), alternative_path(&facade_, heaps),
       direct_shortest_path(&facade_, heaps), max_locations_viaroute(max_locations_viaroute)
@@ -48,7 +46,7 @@ Status ViaRoutePlugin::HandleRequest(const api::RouteParameters &route_parameter
         return Error("InvalidValue", "Invalid coordinate value.", json_result);
     }
 
-    auto phantom_node_pairs = GetPhantomNodes(route_parameters, (route_parameters.uturns && *route_parameters.uturns) || UTURN_DEFAULT);
+    auto phantom_node_pairs = GetPhantomNodes(route_parameters);
     if (phantom_node_pairs.size() != route_parameters.coordinates.size())
     {
         return Error("NoSegment",
