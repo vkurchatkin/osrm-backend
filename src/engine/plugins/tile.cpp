@@ -4,6 +4,7 @@
 #include "util/coordinate_calculation.hpp"
 #include "util/web_mercator.hpp"
 #include "util/vector_tile.hpp"
+#include "util/simple_logger.hpp"
 
 #include <boost/geometry.hpp>
 #include <boost/geometry/geometries/point_xy.hpp>
@@ -16,6 +17,8 @@
 #include <string>
 #include <vector>
 #include <utility>
+
+#include <unordered_set>
 
 #include <cmath>
 #include <cstdint>
@@ -210,6 +213,68 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
                 used_weights.push_back(forward_weight);
                 weight_offsets[forward_weight] = used_weights.size() - 1;
             }
+
+            std::vector<NodeID> forward_node_vector;
+            facade.GetUncompressedGeometry(edge.forward_packed_geometry_id, forward_node_vector);
+
+            if (edge.fwd_segment_position == forward_node_vector.size() - 1)
+            {
+                const auto coord_a = facade.GetCoordinateOfNode(
+                    forward_node_vector.size() > 1
+                        ? forward_node_vector[forward_node_vector.size() - 2]
+                        : edge.u);
+                const auto coord_b = facade.GetCoordinateOfNode(edge.v);
+
+                std::unordered_set<NodeID> c_nodes;
+
+                // Get all outgoing shortcuts
+                for (const auto adj_shortcut :
+                     facade.GetAdjacentEdgeRange(edge.forward_segment_id.id))
+                {
+                    std::vector<NodeID> unpacked_shortcut;
+                    const auto ed = facade.GetEdgeData(adj_shortcut);
+
+                    if (!ed.forward)
+                    {
+                        continue;
+                    }
+
+                    routing_base.UnpackEdgeToEdges(edge.forward_segment_id.id,
+                                                   facade.GetTarget(adj_shortcut),
+                                                   unpacked_shortcut);
+
+                    if (unpacked_shortcut.size() < 2)
+                    {
+                        continue;
+                    }
+
+                    const auto first_geometry_id =
+                        facade.GetGeometryIndexForEdgeID(unpacked_shortcut[1]);
+                    std::vector<NodeID> first_geometry_vector;
+                    facade.GetUncompressedGeometry(first_geometry_id, first_geometry_vector);
+
+                    c_nodes.emplace(first_geometry_vector.front());
+                }
+
+                const double angle_to = util::coordinate_calculation::bearing(coord_a, coord_b);
+                std::vector<double> angles_from;
+
+                for (const auto possible_next_node : c_nodes)
+                {
+                    const auto coord_c = facade.GetCoordinateOfNode(possible_next_node);
+
+                    angles_from.emplace_back(
+                        util::coordinate_calculation::bearing(coord_b, coord_c));
+                }
+
+                // Only write for those that have angles_from array
+
+                util::SimpleLogger().Write() << angle_to << " TO ";
+                for (const auto a : angles_from)
+                {
+                    util::SimpleLogger().Write() << a;
+                }
+            }
         }
 
         if (edge.reverse_packed_geometry_id != SPECIAL_EDGEID)
@@ -246,7 +311,7 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
                                       max_lon, max_lat);
     const detail::BBox tile_bbox{min_lon, min_lat, max_lon, max_lat};
 
-    // Protobuf serialized blocks when objects go out of scope, hence
+    // Protobuf serializes blocks when objects go out of scope, hence
     // the extra scoping below.
     protozero::pbf_writer tile_writer{pbf_buffer};
     {
@@ -259,7 +324,7 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
         layer_writer.add_string(util::vector_tile::NAME_TAG, "speeds"); // name
         // Field 5 is the tile extent.  It's a uint32 and should be set to 4096
         // for normal vector tiles.
-        layer_writer.add_uint32(util::vector_tile::EXTEND_TAG, util::vector_tile::EXTENT); // extent
+        layer_writer.add_uint32(util::vector_tile::EXTENT_TAG, util::vector_tile::EXTENT); // extent
 
         // Begin the layer features block
         {
@@ -267,7 +332,7 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
             unsigned id = 1;
             for (const auto &edge : edges)
             {
-                // Get coordinates for start/end nodes of segmet (NodeIDs u and v)
+                // Get coordinates for start/end nodes of segment (NodeIDs u and v)
                 const auto a = facade.GetCoordinateOfNode(edge.u);
                 const auto b = facade.GetCoordinateOfNode(edge.v);
                 // Calculate the length in meters
@@ -323,7 +388,7 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
                 {
                     // Here, we save the two attributes for our feature: the speed and the
                     // is_small
-                    // boolean.  We onl serve up speeds from 0-139, so all we do is save the
+                    // boolean.  We only serve up speeds from 0-139, so all we do is save the
                     // first
                     protozero::pbf_writer feature_writer(layer_writer,
                                                          util::vector_tile::FEATURE_TAG);
@@ -418,8 +483,8 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
         {
             // Writing field type 4 == variant type
             protozero::pbf_writer values_writer(layer_writer, util::vector_tile::VARIANT_TAG);
-            // Attribute value 5 == uin64 type
-            values_writer.add_uint64(util::vector_tile::VARIANT_TYPE_UINT32, i);
+            // Attribute value 5 == uint64 type
+            values_writer.add_uint64(util::vector_tile::VARIANT_TYPE_UINT64, i);
         }
         {
             protozero::pbf_writer values_writer(layer_writer, util::vector_tile::VARIANT_TAG);
