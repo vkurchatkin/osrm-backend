@@ -19,6 +19,7 @@ const constexpr std::uint32_t GEOMETRY_TAG = 3;
 const constexpr std::uint32_t VARIANT_TAG = 4;
 const constexpr std::uint32_t KEY_TAG = 3;
 const constexpr std::uint32_t ID_TAG = 1;
+const constexpr std::uint32_t GEOMETRY_TYPE_POINT = 1;
 const constexpr std::uint32_t GEOMETRY_TYPE_LINE = 2;
 const constexpr std::uint32_t FEATURE_ATTRIBUTES_TAG = 2;
 const constexpr std::uint32_t FEATURE_GEOMETRIES_TAG = 4;

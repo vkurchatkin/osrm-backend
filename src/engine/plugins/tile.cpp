@@ -73,15 +73,21 @@ struct point_type_i final
 
 struct TurnData final
 {
-    TurnData(std::size_t _in, std::size_t _out, std::size_t _weight) : in_angle_offset(_in), out_angle_offset(_out), weight_offset(_weight) {}
+    TurnData(std::size_t _in, std::size_t _out, std::size_t _weight)
+        : in_angle_offset(_in), out_angle_offset(_out), weight_offset(_weight)
+    {
+    }
 
     const std::size_t in_angle_offset;
     const std::size_t out_angle_offset;
     const std::size_t weight_offset;
 };
 
-using FixedLine = std::vector<detail::Point<std::int32_t>>;
-using FloatLine = std::vector<detail::Point<double>>;
+using FixedPoint = detail::Point<std::int32_t>;
+using FloatPoint = detail::Point<double>;
+
+using FixedLine = std::vector<FixedPoint>;
+using FloatLine = std::vector<FloatPoint>;
 
 typedef boost::geometry::model::point<double, 2, boost::geometry::cs::cartesian> point_t;
 typedef boost::geometry::model::linestring<point_t> linestring_t;
@@ -122,6 +128,24 @@ inline bool encodeLinestring(const FixedLine &line,
         start_x = pt->x;
         start_y = pt->y;
     }
+    return true;
+}
+
+// from mapnik-vctor-tile
+// Encodes a point
+inline bool encodePoint(const FixedPoint &pt,
+                        protozero::packed_field_uint32 &geometry,
+                        std::int32_t &start_x,
+                        std::int32_t &start_y)
+{
+    geometry.add_element(9);
+    std::int32_t dx = pt.x - start_x;
+    std::int32_t dy = pt.y - start_y;
+    // Manual zigzag encoding.
+    geometry.add_element(protozero::encode_zigzag32(dx));
+    geometry.add_element(protozero::encode_zigzag32(dy));
+    start_x = pt.x;
+    start_y = pt.y;
     return true;
 }
 
@@ -174,6 +198,25 @@ FixedLine coordinatesToTileLine(const util::Coordinate start,
 
     return tile_line;
 }
+
+FixedPoint coordinatesToTilePoint(const util::Coordinate point, const detail::BBox &tile_bbox)
+{
+    FloatPoint geo_point{static_cast<double>(util::toFloating(point.lon)),
+                         static_cast<double>(util::toFloating(point.lat))};
+
+    double px_merc = geo_point.x * util::web_mercator::DEGREE_TO_PX;
+    double py_merc = util::web_mercator::latToY(util::FloatLatitude(geo_point.y)) *
+                     util::web_mercator::DEGREE_TO_PX;
+
+    const auto px = std::round(
+        ((px_merc - tile_bbox.minx) * util::web_mercator::TILE_SIZE / tile_bbox.width()) *
+        util::vector_tile::EXTENT / util::web_mercator::TILE_SIZE);
+    const auto py = std::round(
+        ((tile_bbox.maxy - py_merc) * util::web_mercator::TILE_SIZE / tile_bbox.height()) *
+        util::vector_tile::EXTENT / util::web_mercator::TILE_SIZE);
+
+    return FixedPoint(px, py);
+}
 }
 
 Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::string &pbf_buffer)
@@ -193,19 +236,33 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
     // This hits the OSRM StaticRTree
     const auto edges = facade.GetEdgesInBox(southwest, northeast);
 
-    std::vector<int> used_ints;
-    std::unordered_map<int, std::size_t> int_offsets;
+    std::vector<int> used_line_ints;
+    std::unordered_map<int, std::size_t> line_int_offsets;
     uint8_t max_datasource_id = 0;
+
+    std::vector<int> used_point_ints;
+    std::unordered_map<int, std::size_t> point_int_offsets;
     std::vector<std::vector<detail::TurnData>> all_turn_data;
 
-    const auto use_value = [&used_ints, &int_offsets](
-        const int &value)
+    const auto use_line_value = [&used_line_ints, &line_int_offsets](const int &value)
     {
-        const auto found = int_offsets.find(value);
-        if (found == int_offsets.end())
+        const auto found = line_int_offsets.find(value);
+        if (found == line_int_offsets.end())
         {
-            used_ints.push_back(value);
-            int_offsets[value] = used_ints.size() - 1;
+            used_line_ints.push_back(value);
+            line_int_offsets[value] = used_line_ints.size() - 1;
+        }
+
+        return found->second;
+    };
+
+    const auto use_point_value = [&used_point_ints, &point_int_offsets](const int &value)
+    {
+        const auto found = point_int_offsets.find(value);
+        if (found == point_int_offsets.end())
+        {
+            used_point_ints.push_back(value);
+            point_int_offsets[value] = used_point_ints.size() - 1;
         }
 
         return found->second;
@@ -220,6 +277,8 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
         uint8_t forward_datasource = 0;
         uint8_t reverse_datasource = 0;
         std::vector<detail::TurnData> edge_turn_data;
+        // TODO this approach of writing at least an empty vector for any segment is probably stupid
+        // (inefficient)
 
         if (edge.forward_packed_geometry_id != SPECIAL_EDGEID)
         {
@@ -232,14 +291,15 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
                                               forward_datasource_vector);
             forward_datasource = forward_datasource_vector[edge.fwd_segment_position];
 
-            use_value(forward_weight);
+            use_line_value(forward_weight);
 
             std::vector<NodeID> forward_node_vector;
             facade.GetUncompressedGeometry(edge.forward_packed_geometry_id, forward_node_vector);
 
             if (edge.fwd_segment_position == forward_node_vector.size() - 1)
             {
-                auto sum_node_weight = std::accumulate(forward_weight_vector.begin(), forward_weight_vector.end(), 0);
+                auto sum_node_weight =
+                    std::accumulate(forward_weight_vector.begin(), forward_weight_vector.end(), 0);
 
                 const auto coord_a = facade.GetCoordinateOfNode(
                     forward_node_vector.size() > 1
@@ -287,7 +347,7 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
                 // Only write for those that have angles out
                 if (c_nodes.size() > 0)
                 {
-                    const auto angle_in_offset = use_value(angle_in);
+                    const auto angle_in_offset = use_point_value(angle_in);
 
                     for (const auto possible_next_node : c_nodes)
                     {
@@ -295,13 +355,16 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
                         const auto c_bearing = static_cast<uint64_t>(
                             util::coordinate_calculation::bearing(coord_b, coord_c));
 
-                        const auto angle_out_offset = use_value(c_bearing);
-                        const auto angle_weight_offset = use_value(possible_next_node.second);
+                        const auto angle_out_offset = use_point_value(c_bearing);
+                        const auto angle_weight_offset = use_point_value(possible_next_node.second);
 
-                        // TODO this is not as efficient as it could be because of repeated angles_in
-                        edge_turn_data.emplace_back(detail::TurnData{angle_in_offset, angle_out_offset, angle_weight_offset});
+                        // TODO this is not as efficient as it could be because of repeated
+                        // angles_in
+                        edge_turn_data.emplace_back(detail::TurnData{
+                            angle_in_offset, angle_out_offset, angle_weight_offset});
 
-                        util::SimpleLogger().Write() << angle_in << " " << c_bearing << " " << possible_next_node.second;
+                        util::SimpleLogger().Write() << angle_in << " " << c_bearing << " "
+                                                     << possible_next_node.second;
                     }
                 }
             }
@@ -317,7 +380,7 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
             reverse_weight =
                 reverse_weight_vector[reverse_weight_vector.size() - edge.fwd_segment_position - 1];
 
-            use_value(reverse_weight);
+            use_line_value(reverse_weight);
 
             std::vector<uint8_t> reverse_datasource_vector;
             facade.GetUncompressedDatasources(edge.reverse_packed_geometry_id,
@@ -345,15 +408,16 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
     protozero::pbf_writer tile_writer{pbf_buffer};
     {
         // Add a layer object to the PBF stream.  3=='layer' from the vector tile spec (2.1)
-        protozero::pbf_writer layer_writer(tile_writer, util::vector_tile::LAYER_TAG);
+        protozero::pbf_writer line_layer_writer(tile_writer, util::vector_tile::LAYER_TAG);
         // TODO: don't write a layer if there are no features
 
-        layer_writer.add_uint32(util::vector_tile::VERSION_TAG, 2); // version
+        line_layer_writer.add_uint32(util::vector_tile::VERSION_TAG, 2); // version
         // Field 1 is the "layer name" field, it's a string
-        layer_writer.add_string(util::vector_tile::NAME_TAG, "speeds"); // name
+        line_layer_writer.add_string(util::vector_tile::NAME_TAG, "speeds"); // name
         // Field 5 is the tile extent.  It's a uint32 and should be set to 4096
         // for normal vector tiles.
-        layer_writer.add_uint32(util::vector_tile::EXTENT_TAG, util::vector_tile::EXTENT); // extent
+        line_layer_writer.add_uint32(util::vector_tile::EXTENT_TAG,
+                                     util::vector_tile::EXTENT); // extent
 
         // Begin the layer features block
         {
@@ -410,7 +474,7 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
                 max_datasource_id = std::max(max_datasource_id, forward_datasource);
                 max_datasource_id = std::max(max_datasource_id, reverse_datasource);
 
-                const auto encode_tile_line = [&layer_writer, &edge, &id, &max_datasource_id](
+                const auto encode_tile_line = [&line_layer_writer, &edge, &id, &max_datasource_id](
                     const detail::FixedLine &tile_line, const std::uint32_t speed_kmh,
                     const std::size_t duration, const std::uint8_t datasource,
                     std::int32_t &start_x, std::int32_t &start_y)
@@ -419,7 +483,7 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
                     // is_small
                     // boolean.  We only serve up speeds from 0-139, so all we do is save the
                     // first
-                    protozero::pbf_writer feature_writer(layer_writer,
+                    protozero::pbf_writer feature_writer(line_layer_writer,
                                                          util::vector_tile::FEATURE_TAG);
                     // Field 3 is the "geometry type" field.  Value 2 is "line"
                     feature_writer.add_enum(util::vector_tile::GEOMETRY_TAG,
@@ -471,7 +535,7 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
                     auto tile_line = coordinatesToTileLine(a, b, tile_bbox);
                     if (!tile_line.empty())
                     {
-                        encode_tile_line(tile_line, speed_kmh, int_offsets[forward_weight],
+                        encode_tile_line(tile_line, speed_kmh, line_int_offsets[forward_weight],
                                          forward_datasource, start_x, start_y);
                     }
                 }
@@ -490,7 +554,7 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
                     auto tile_line = coordinatesToTileLine(b, a, tile_bbox);
                     if (!tile_line.empty())
                     {
-                        encode_tile_line(tile_line, speed_kmh, int_offsets[reverse_weight],
+                        encode_tile_line(tile_line, speed_kmh, line_int_offsets[reverse_weight],
                                          reverse_datasource, start_x, start_y);
                     }
                 }
@@ -500,10 +564,10 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
         // Field id 3 is the "keys" attribute
         // We need two "key" fields, these are referred to with 0 and 1 (their array indexes)
         // earlier
-        layer_writer.add_string(util::vector_tile::KEY_TAG, "speed");
-        layer_writer.add_string(util::vector_tile::KEY_TAG, "is_small");
-        layer_writer.add_string(util::vector_tile::KEY_TAG, "datasource");
-        layer_writer.add_string(util::vector_tile::KEY_TAG, "duration");
+        line_layer_writer.add_string(util::vector_tile::KEY_TAG, "speed");
+        line_layer_writer.add_string(util::vector_tile::KEY_TAG, "is_small");
+        line_layer_writer.add_string(util::vector_tile::KEY_TAG, "datasource");
+        line_layer_writer.add_string(util::vector_tile::KEY_TAG, "duration");
 
         // Now, we write out the possible speed value arrays and possible is_tiny
         // values.  Field type 4 is the "values" field.  It's a variable type field,
@@ -511,36 +575,135 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
         for (std::size_t i = 0; i < 128; i++)
         {
             // Writing field type 4 == variant type
-            protozero::pbf_writer values_writer(layer_writer, util::vector_tile::VARIANT_TAG);
+            protozero::pbf_writer values_writer(line_layer_writer, util::vector_tile::VARIANT_TAG);
             // Attribute value 5 == uint64 type
             values_writer.add_uint64(util::vector_tile::VARIANT_TYPE_UINT64, i);
         }
         {
-            protozero::pbf_writer values_writer(layer_writer, util::vector_tile::VARIANT_TAG);
+            protozero::pbf_writer values_writer(line_layer_writer, util::vector_tile::VARIANT_TAG);
             // Attribute value 7 == bool type
             values_writer.add_bool(util::vector_tile::VARIANT_TYPE_BOOL, true);
         }
         {
-            protozero::pbf_writer values_writer(layer_writer, util::vector_tile::VARIANT_TAG);
+            protozero::pbf_writer values_writer(line_layer_writer, util::vector_tile::VARIANT_TAG);
             // Attribute value 7 == bool type
             values_writer.add_bool(util::vector_tile::VARIANT_TYPE_BOOL, false);
         }
         for (std::size_t i = 0; i <= max_datasource_id; i++)
         {
             // Writing field type 4 == variant type
-            protozero::pbf_writer values_writer(layer_writer, util::vector_tile::VARIANT_TAG);
+            protozero::pbf_writer values_writer(line_layer_writer, util::vector_tile::VARIANT_TAG);
             // Attribute value 1 == string type
             values_writer.add_string(util::vector_tile::VARIANT_TYPE_STRING,
                                      facade.GetDatasourceName(i));
         }
-        for (auto value : used_ints)
+        for (auto value : used_line_ints)
         {
             // Writing field type 4 == variant type
-            protozero::pbf_writer values_writer(layer_writer, util::vector_tile::VARIANT_TAG);
+            protozero::pbf_writer values_writer(line_layer_writer, util::vector_tile::VARIANT_TAG);
             // Attribute value 2 == float type
             // Durations come out of OSRM in integer deciseconds, so we convert them
             // to seconds with a simple /10 for display
             values_writer.add_double(util::vector_tile::VARIANT_TYPE_DOUBLE, value / 10.);
+        }
+
+        // Now write the points layer for turn penalty data:
+        // Add a layer object to the PBF stream.  3=='layer' from the vector tile spec (2.1)
+        protozero::pbf_writer point_layer_writer(tile_writer, util::vector_tile::LAYER_TAG);
+        // TODO: don't write a layer if there are no features
+
+        point_layer_writer.add_uint32(util::vector_tile::VERSION_TAG, 2); // version
+        // Field 1 is the "layer name" field, it's a string
+        point_layer_writer.add_string(util::vector_tile::NAME_TAG, "turns"); // name
+        // Field 5 is the tile extent.  It's a uint32 and should be set to 4096
+        // for normal vector tiles.
+        point_layer_writer.add_uint32(util::vector_tile::EXTENT_TAG,
+                                      util::vector_tile::EXTENT); // extent
+
+        // Begin the layer features block
+        {
+            // Each feature gets a unique id, starting at 1
+            unsigned id = 1;
+            for (uint64_t i = 0; i < edges.size(); i++)
+            {
+                const auto &edge = edges[i];
+                const auto &edge_turn_data = all_turn_data[i];
+
+                // Skip writing for edges with no turn penalty data
+                if (edge_turn_data.empty())
+                {
+                    continue;
+                }
+
+                std::vector<NodeID> forward_node_vector;
+                facade.GetUncompressedGeometry(edge.forward_packed_geometry_id,
+                                               forward_node_vector);
+
+                // Skip writing for non-intersection segments
+                if (edge.fwd_segment_position != forward_node_vector.size() - 1)
+                {
+                    continue;
+                }
+
+                const auto encode_tile_point =
+                    [&point_layer_writer, &edge, &id](const detail::FixedPoint &tile_point,
+                                                      const detail::TurnData &point_turn_data,
+                                                      std::int32_t &start_x, std::int32_t &start_y)
+                {
+                    protozero::pbf_writer feature_writer(point_layer_writer,
+                                                         util::vector_tile::FEATURE_TAG);
+                    // Field 3 is the "geometry type" field.  Value 1 is "point"
+                    feature_writer.add_enum(
+                        util::vector_tile::GEOMETRY_TAG,
+                        util::vector_tile::GEOMETRY_TYPE_POINT); // geometry type
+                    // Field 1 for the feature is the "id" field.
+                    feature_writer.add_uint64(util::vector_tile::ID_TAG, id++); // id
+                    {
+                        // See above for explanation
+                        protozero::packed_field_uint32 field(
+                            feature_writer, util::vector_tile::FEATURE_ATTRIBUTES_TAG);
+
+                        field.add_element(0); // "bearing_in" tag key offset
+                        field.add_element(point_turn_data.in_angle_offset);
+                        field.add_element(1); // "bearing_out" tag key offset
+                        field.add_element(point_turn_data.out_angle_offset);
+                        field.add_element(2); // "weight" tag key offset
+                        field.add_element(point_turn_data.weight_offset);
+                    }
+                    {
+                        protozero::packed_field_uint32 geometry(
+                            feature_writer, util::vector_tile::FEATURE_GEOMETRIES_TAG);
+                        encodePoint(tile_point, geometry, start_x, start_y);
+                    }
+                };
+
+                const auto turn_coordinate = facade.GetCoordinateOfNode(edge.v);
+                const auto tile_point = coordinatesToTilePoint(turn_coordinate, tile_bbox);
+
+                for (const auto &individual_turn : edge_turn_data)
+                {
+                    std::int32_t start_x = 0;
+                    std::int32_t start_y = 0;
+
+                    encode_tile_point(tile_point, individual_turn, start_x, start_y);
+                }
+            }
+        }
+
+        // Field id 3 is the "keys" attribute
+        // We need two "key" fields, these are referred to with 0 and 1 (their array indexes)
+        // earlier
+        point_layer_writer.add_string(util::vector_tile::KEY_TAG, "bearing_in");
+        point_layer_writer.add_string(util::vector_tile::KEY_TAG, "bearing_out");
+        point_layer_writer.add_string(util::vector_tile::KEY_TAG, "weight");
+
+        // Now, we write out the possible integer values.
+        for (const auto &value : used_point_ints)
+        {
+            // Writing field type 4 == variant type
+            protozero::pbf_writer values_writer(point_layer_writer, util::vector_tile::VARIANT_TAG);
+            // Attribute value 5 == uint64 type
+            values_writer.add_uint64(util::vector_tile::VARIANT_TYPE_UINT64, value);
         }
     }
 
