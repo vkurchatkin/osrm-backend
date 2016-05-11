@@ -17,8 +17,8 @@
 #include <string>
 #include <vector>
 #include <utility>
-
-#include <unordered_set>
+#include <algorithm>
+#include <numeric>
 
 #include <cmath>
 #include <cstdint>
@@ -69,6 +69,15 @@ struct point_type_i final
 
     const std::int64_t x;
     const std::int64_t y;
+};
+
+struct TurnData final
+{
+    TurnData(std::size_t _in, std::size_t _out, std::size_t _weight) : in_angle_offset(_in), out_angle_offset(_out), weight_offset(_weight) {}
+
+    const std::size_t in_angle_offset;
+    const std::size_t out_angle_offset;
+    const std::size_t weight_offset;
 };
 
 using FixedLine = std::vector<detail::Point<std::int32_t>>;
@@ -184,9 +193,23 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
     // This hits the OSRM StaticRTree
     const auto edges = facade.GetEdgesInBox(southwest, northeast);
 
-    std::vector<int> used_weights;
-    std::unordered_map<int, std::size_t> weight_offsets;
+    std::vector<int> used_ints;
+    std::unordered_map<int, std::size_t> int_offsets;
     uint8_t max_datasource_id = 0;
+    std::vector<std::vector<detail::TurnData>> all_turn_data;
+
+    const auto use_value = [&used_ints, &int_offsets](
+        const int &value)
+    {
+        const auto found = int_offsets.find(value);
+        if (found == int_offsets.end())
+        {
+            used_ints.push_back(value);
+            int_offsets[value] = used_ints.size() - 1;
+        }
+
+        return found->second;
+    };
 
     // Loop over all edges once to tally up all the attributes we'll need.
     // We need to do this so that we know the attribute offsets to use
@@ -196,6 +219,7 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
         int forward_weight = 0, reverse_weight = 0;
         uint8_t forward_datasource = 0;
         uint8_t reverse_datasource = 0;
+        std::vector<detail::TurnData> edge_turn_data;
 
         if (edge.forward_packed_geometry_id != SPECIAL_EDGEID)
         {
@@ -208,33 +232,30 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
                                               forward_datasource_vector);
             forward_datasource = forward_datasource_vector[edge.fwd_segment_position];
 
-            if (weight_offsets.find(forward_weight) == weight_offsets.end())
-            {
-                used_weights.push_back(forward_weight);
-                weight_offsets[forward_weight] = used_weights.size() - 1;
-            }
+            use_value(forward_weight);
 
             std::vector<NodeID> forward_node_vector;
             facade.GetUncompressedGeometry(edge.forward_packed_geometry_id, forward_node_vector);
 
             if (edge.fwd_segment_position == forward_node_vector.size() - 1)
             {
+                auto sum_node_weight = std::accumulate(forward_weight_vector.begin(), forward_weight_vector.end(), 0);
+
                 const auto coord_a = facade.GetCoordinateOfNode(
                     forward_node_vector.size() > 1
                         ? forward_node_vector[forward_node_vector.size() - 2]
                         : edge.u);
                 const auto coord_b = facade.GetCoordinateOfNode(edge.v);
 
-                std::unordered_set<NodeID> c_nodes;
+                std::unordered_map<NodeID, int> c_nodes;
 
                 // Get all outgoing shortcuts
                 for (const auto adj_shortcut :
                      facade.GetAdjacentEdgeRange(edge.forward_segment_id.id))
                 {
-                    std::vector<NodeID> unpacked_shortcut;
-                    const auto ed = facade.GetEdgeData(adj_shortcut);
+                    std::vector<contractor::QueryEdge::EdgeData> unpacked_shortcut;
 
-                    if (!ed.forward)
+                    if (!facade.GetEdgeData(adj_shortcut).forward)
                     {
                         continue;
                     }
@@ -249,30 +270,39 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
                     }
 
                     const auto first_geometry_id =
-                        facade.GetGeometryIndexForEdgeID(unpacked_shortcut[1]);
+                        facade.GetGeometryIndexForEdgeID(unpacked_shortcut[1].id);
                     std::vector<NodeID> first_geometry_vector;
                     facade.GetUncompressedGeometry(first_geometry_id, first_geometry_vector);
 
-                    c_nodes.emplace(first_geometry_vector.front());
+                    auto sum_edge_weight = unpacked_shortcut[0].distance;
+
+                    auto turn_weight = sum_edge_weight - sum_node_weight;
+
+                    c_nodes.emplace(first_geometry_vector.front(), turn_weight);
                 }
 
-                const double angle_to = util::coordinate_calculation::bearing(coord_a, coord_b);
-                std::vector<double> angles_from;
+                const uint64_t angle_in =
+                    static_cast<uint64_t>(util::coordinate_calculation::bearing(coord_a, coord_b));
 
-                for (const auto possible_next_node : c_nodes)
+                // Only write for those that have angles out
+                if (c_nodes.size() > 0)
                 {
-                    const auto coord_c = facade.GetCoordinateOfNode(possible_next_node);
+                    const auto angle_in_offset = use_value(angle_in);
 
-                    angles_from.emplace_back(
-                        util::coordinate_calculation::bearing(coord_b, coord_c));
-                }
+                    for (const auto possible_next_node : c_nodes)
+                    {
+                        const auto coord_c = facade.GetCoordinateOfNode(possible_next_node.first);
+                        const auto c_bearing = static_cast<uint64_t>(
+                            util::coordinate_calculation::bearing(coord_b, coord_c));
 
-                // Only write for those that have angles_from array
+                        const auto angle_out_offset = use_value(c_bearing);
+                        const auto angle_weight_offset = use_value(possible_next_node.second);
 
-                util::SimpleLogger().Write() << angle_to << " TO ";
-                for (const auto a : angles_from)
-                {
-                    util::SimpleLogger().Write() << a;
+                        // TODO this is not as efficient as it could be because of repeated angles_in
+                        edge_turn_data.emplace_back(detail::TurnData{angle_in_offset, angle_out_offset, angle_weight_offset});
+
+                        util::SimpleLogger().Write() << angle_in << " " << c_bearing << " " << possible_next_node.second;
+                    }
                 }
             }
         }
@@ -287,11 +317,8 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
             reverse_weight =
                 reverse_weight_vector[reverse_weight_vector.size() - edge.fwd_segment_position - 1];
 
-            if (weight_offsets.find(reverse_weight) == weight_offsets.end())
-            {
-                used_weights.push_back(reverse_weight);
-                weight_offsets[reverse_weight] = used_weights.size() - 1;
-            }
+            use_value(reverse_weight);
+
             std::vector<uint8_t> reverse_datasource_vector;
             facade.GetUncompressedDatasources(edge.reverse_packed_geometry_id,
                                               reverse_datasource_vector);
@@ -302,6 +329,8 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
         // data to the layer attribute values
         max_datasource_id = std::max(max_datasource_id, forward_datasource);
         max_datasource_id = std::max(max_datasource_id, reverse_datasource);
+
+        all_turn_data.emplace_back(std::move(edge_turn_data));
     }
 
     // TODO: extract speed values for compressed and uncompressed geometries
@@ -442,7 +471,7 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
                     auto tile_line = coordinatesToTileLine(a, b, tile_bbox);
                     if (!tile_line.empty())
                     {
-                        encode_tile_line(tile_line, speed_kmh, weight_offsets[forward_weight],
+                        encode_tile_line(tile_line, speed_kmh, int_offsets[forward_weight],
                                          forward_datasource, start_x, start_y);
                     }
                 }
@@ -461,7 +490,7 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
                     auto tile_line = coordinatesToTileLine(b, a, tile_bbox);
                     if (!tile_line.empty())
                     {
-                        encode_tile_line(tile_line, speed_kmh, weight_offsets[reverse_weight],
+                        encode_tile_line(tile_line, speed_kmh, int_offsets[reverse_weight],
                                          reverse_datasource, start_x, start_y);
                     }
                 }
@@ -504,14 +533,14 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
             values_writer.add_string(util::vector_tile::VARIANT_TYPE_STRING,
                                      facade.GetDatasourceName(i));
         }
-        for (auto weight : used_weights)
+        for (auto value : used_ints)
         {
             // Writing field type 4 == variant type
             protozero::pbf_writer values_writer(layer_writer, util::vector_tile::VARIANT_TAG);
             // Attribute value 2 == float type
             // Durations come out of OSRM in integer deciseconds, so we convert them
             // to seconds with a simple /10 for display
-            values_writer.add_double(util::vector_tile::VARIANT_TYPE_DOUBLE, weight / 10.);
+            values_writer.add_double(util::vector_tile::VARIANT_TYPE_DOUBLE, value / 10.);
         }
     }
 

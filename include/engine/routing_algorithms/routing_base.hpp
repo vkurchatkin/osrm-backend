@@ -484,7 +484,7 @@ template <class DataFacadeT, class Derived> class BasicRoutingInterface
         unpacked_path.emplace_back(t);
     }
 
-    void UnpackEdgeToEdges(const NodeID s, const NodeID t, std::vector<NodeID> &unpacked_path) const
+    void UnpackEdgeToEdges(const NodeID s, const NodeID t, std::vector<EdgeData> &unpacked_path) const
     {
         std::stack<std::pair<NodeID, NodeID>> recursion_stack;
         recursion_stack.emplace(s, t);
@@ -535,7 +535,7 @@ template <class DataFacadeT, class Derived> class BasicRoutingInterface
             else
             {
                 BOOST_ASSERT_MSG(!ed.shortcut, "edge must be shortcut");
-                unpacked_path.emplace_back(ed.id);
+                unpacked_path.emplace_back(ed);
             }
         }
     }
