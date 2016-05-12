@@ -695,6 +695,12 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
                     const auto turn_coordinate = facade.GetCoordinateOfNode(edge.v);
                     const auto tile_point = coordinatesToTilePoint(turn_coordinate, tile_bbox);
 
+                    if (!boost::geometry::within(detail::point_t(tile_point.x, tile_point.y),
+                                                 detail::clip_box))
+                    {
+                        continue;
+                    }
+
                     for (const auto &individual_turn : edge_turn_data)
                     {
                         std::int32_t start_x = 0;
