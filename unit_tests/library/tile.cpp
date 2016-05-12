@@ -39,7 +39,7 @@ BOOST_AUTO_TEST_CASE(test_tile)
     BOOST_CHECK_EQUAL(tile_message.tag(), util::vector_tile::LAYER_TAG); // must be a layer
     protozero::pbf_reader layer_message = tile_message.get_message();
 
-    const auto check_feature = [](protozero::pbf_reader feature_message) {
+    const auto check_speed_feature = [](protozero::pbf_reader feature_message) {
         protozero::pbf_reader::const_uint32_iterator value_begin;
         protozero::pbf_reader::const_uint32_iterator value_end;
         feature_message.next(); // advance parser to first entry
@@ -88,15 +88,16 @@ BOOST_AUTO_TEST_CASE(test_tile)
                 case util::vector_tile::VARIANT_TYPE_STRING:
                     value.get_string();
                     break;
-                case util::vector_tile::VARIANT_TYPE_UINT32:
-                    value.get_uint32();
+                case util::vector_tile::VARIANT_TYPE_UINT64:
+                    value.get_uint64();
                     break;
             }
         }
     };
 
-    auto number_of_keys = 0u;
-    auto number_of_values = 0u;
+    auto number_of_speed_keys = 0u;
+    auto number_of_speed_values = 0u;
+
 
     while (layer_message.next())
     {
@@ -108,19 +109,19 @@ BOOST_AUTO_TEST_CASE(test_tile)
             case util::vector_tile::NAME_TAG:
                 BOOST_CHECK_EQUAL(layer_message.get_string(), "speeds");
                 break;
-            case util::vector_tile::EXTEND_TAG:
+            case util::vector_tile::EXTENT_TAG:
                 BOOST_CHECK_EQUAL(layer_message.get_uint32(), util::vector_tile::EXTENT);
                 break;
             case util::vector_tile::FEATURE_TAG:
-                check_feature(layer_message.get_message());
+                check_speed_feature(layer_message.get_message());
                 break;
             case util::vector_tile::KEY_TAG:
                 layer_message.get_string();
-                number_of_keys++;
+                number_of_speed_keys++;
                 break;
             case util::vector_tile::VARIANT_TAG:
                 check_value(layer_message.get_message());
-                number_of_values++;
+                number_of_speed_values++;
                 break;
             default:
                 BOOST_CHECK(false); // invalid tag
@@ -128,8 +129,74 @@ BOOST_AUTO_TEST_CASE(test_tile)
         }
     }
 
-    BOOST_CHECK_EQUAL(number_of_keys, 4);
-    BOOST_CHECK_GT(number_of_values, 128); // speed value resolution
+    BOOST_CHECK_EQUAL(number_of_speed_keys, 4);
+    BOOST_CHECK_GT(number_of_speed_values, 128); // speed value resolution
+
+    tile_message.next();
+    layer_message = tile_message.get_message();
+
+    const auto check_turn_feature = [](protozero::pbf_reader feature_message) {
+        protozero::pbf_reader::const_uint32_iterator value_begin;
+        protozero::pbf_reader::const_uint32_iterator value_end;
+        feature_message.next(); // advance parser to first entry
+        BOOST_CHECK_EQUAL(feature_message.tag(), util::vector_tile::GEOMETRY_TAG);
+        BOOST_CHECK_EQUAL(feature_message.get_enum(), util::vector_tile::GEOMETRY_TYPE_POINT);
+
+        feature_message.next(); // advance to next entry
+        BOOST_CHECK_EQUAL(feature_message.tag(), util::vector_tile::ID_TAG);
+        feature_message.get_uint64(); // id
+
+        feature_message.next(); // advance to next entry
+        BOOST_CHECK_EQUAL(feature_message.tag(), util::vector_tile::FEATURE_ATTRIBUTES_TAG);
+        // properties
+        std::tie(value_begin, value_end) = feature_message.get_packed_uint32();
+        BOOST_CHECK_EQUAL(std::distance(value_begin, value_end), 6);
+        auto iter = value_begin;
+        BOOST_CHECK_EQUAL(*iter++, 0); // bearing_in key
+        *iter++;
+        BOOST_CHECK_EQUAL(*iter++, 1); // bearing_out key
+        *iter++;
+        BOOST_CHECK_EQUAL(*iter++, 2); // weight key
+        *iter++; // skip value check, can be valud uint32
+        BOOST_CHECK(iter == value_end);
+        // geometry
+        feature_message.next();
+        std::tie(value_begin, value_end) = feature_message.get_packed_uint32();
+        BOOST_CHECK_GT(std::distance(value_begin, value_end), 1);
+    };
+
+    auto number_of_turn_keys = 0u;
+
+    while (layer_message.next())
+    {
+        switch(layer_message.tag())
+        {
+            case util::vector_tile::VERSION_TAG:
+                BOOST_CHECK_EQUAL(layer_message.get_uint32(), 2);
+                break;
+            case util::vector_tile::NAME_TAG:
+                BOOST_CHECK_EQUAL(layer_message.get_string(), "turns");
+                break;
+            case util::vector_tile::EXTENT_TAG:
+                BOOST_CHECK_EQUAL(layer_message.get_uint32(), util::vector_tile::EXTENT);
+                break;
+            case util::vector_tile::FEATURE_TAG:
+                check_turn_feature(layer_message.get_message());
+                break;
+            case util::vector_tile::KEY_TAG:
+                layer_message.get_string();
+                number_of_turn_keys++;
+                break;
+            case util::vector_tile::VARIANT_TAG:
+                check_value(layer_message.get_message());
+                break;
+            default:
+                BOOST_CHECK(false); // invalid tag
+                break;
+        }
+    }
+
+    BOOST_CHECK_EQUAL(number_of_turn_keys, 3);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
