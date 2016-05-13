@@ -484,7 +484,14 @@ template <class DataFacadeT, class Derived> class BasicRoutingInterface
         unpacked_path.emplace_back(t);
     }
 
-    void UnpackEdgeToEdges(const NodeID s, const NodeID t, std::vector<EdgeData> &unpacked_path) const
+    /**
+     * A duplicate of the above `UnpackEdge` function, but returning full EdgeData
+     * objects for the unpacked path. Used in the tile plugin to find outgoing
+     * edges from a given turn.
+     */
+
+    void
+    UnpackEdgeToEdges(const NodeID s, const NodeID t, std::vector<EdgeData> &unpacked_path) const
     {
         std::stack<std::pair<NodeID, NodeID>> recursion_stack;
         recursion_stack.emplace(s, t);

@@ -132,19 +132,14 @@ inline bool encodeLinestring(const FixedLine &line,
 
 // from mapnik-vctor-tile
 // Encodes a point
-inline bool encodePoint(const FixedPoint &pt,
-                        protozero::packed_field_uint32 &geometry,
-                        std::int32_t &start_x,
-                        std::int32_t &start_y)
+inline bool encodePoint(const FixedPoint &pt, protozero::packed_field_uint32 &geometry)
 {
     geometry.add_element(9);
-    std::int32_t dx = pt.x - start_x;
-    std::int32_t dy = pt.y - start_y;
+    const std::int32_t dx = pt.x;
+    const std::int32_t dy = pt.y;
     // Manual zigzag encoding.
     geometry.add_element(protozero::encode_zigzag32(dx));
     geometry.add_element(protozero::encode_zigzag32(dy));
-    start_x = pt.x;
-    start_y = pt.y;
     return true;
 }
 
@@ -200,21 +195,21 @@ FixedLine coordinatesToTileLine(const util::Coordinate start,
 
 FixedPoint coordinatesToTilePoint(const util::Coordinate point, const detail::BBox &tile_bbox)
 {
-    FloatPoint geo_point{static_cast<double>(util::toFloating(point.lon)),
-                         static_cast<double>(util::toFloating(point.lat))};
+    const FloatPoint geo_point{static_cast<double>(util::toFloating(point.lon)),
+                               static_cast<double>(util::toFloating(point.lat))};
 
-    double px_merc = geo_point.x * util::web_mercator::DEGREE_TO_PX;
-    double py_merc = util::web_mercator::latToY(util::FloatLatitude(geo_point.y)) *
-                     util::web_mercator::DEGREE_TO_PX;
+    const double px_merc = geo_point.x * util::web_mercator::DEGREE_TO_PX;
+    const double py_merc = util::web_mercator::latToY(util::FloatLatitude(geo_point.y)) *
+                           util::web_mercator::DEGREE_TO_PX;
 
-    const auto px = std::round(
+    const auto px = static_cast<std::int32_t>(std::round(
         ((px_merc - tile_bbox.minx) * util::web_mercator::TILE_SIZE / tile_bbox.width()) *
-        util::vector_tile::EXTENT / util::web_mercator::TILE_SIZE);
-    const auto py = std::round(
+        util::vector_tile::EXTENT / util::web_mercator::TILE_SIZE));
+    const auto py = static_cast<std::int32_t>(std::round(
         ((tile_bbox.maxy - py_merc) * util::web_mercator::TILE_SIZE / tile_bbox.height()) *
-        util::vector_tile::EXTENT / util::web_mercator::TILE_SIZE);
+        util::vector_tile::EXTENT / util::web_mercator::TILE_SIZE));
 
-    return FixedPoint(px, py);
+    return FixedPoint{px, py};
 }
 }
 
@@ -303,25 +298,36 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
             std::vector<NodeID> forward_node_vector;
             facade.GetUncompressedGeometry(edge.forward_packed_geometry_id, forward_node_vector);
 
+            // If this is the last segment on an edge (i.e. leads to an intersection), find outgoing
+            // turns to write the turns point layer.
             if (edge.fwd_segment_position == forward_node_vector.size() - 1)
             {
-                auto sum_node_weight =
+                const auto sum_node_weight =
                     std::accumulate(forward_weight_vector.begin(), forward_weight_vector.end(), 0);
 
+                // coord_a will be the OSM node immediately preceding the intersection, on the
+                // current edge
                 const auto coord_a = facade.GetCoordinateOfNode(
                     forward_node_vector.size() > 1
                         ? forward_node_vector[forward_node_vector.size() - 2]
                         : edge.u);
+                // coord_b is the OSM intersection node, at the end of the current edge
                 const auto coord_b = facade.GetCoordinateOfNode(edge.v);
 
+                // There will often be multiple c_nodes. Here, we start by getting all outgoing
+                // shortcuts, which we can whittle down (and deduplicate) to just the edges
+                // immediately following intersections.
+                // NOTE: the approach of only using shortcuts means that we aren't
+                // getting or writing *every* turn here, but we don't especially care about turns
+                // that will never be returned in a route anyway.
                 std::unordered_map<NodeID, int> c_nodes;
 
-                // Get all outgoing shortcuts
                 for (const auto adj_shortcut :
                      facade.GetAdjacentEdgeRange(edge.forward_segment_id.id))
                 {
                     std::vector<contractor::QueryEdge::EdgeData> unpacked_shortcut;
 
+                    // Outgoing shortcuts without `forward` travel enabled: do not want
                     if (!facade.GetEdgeData(adj_shortcut).forward)
                     {
                         continue;
@@ -331,19 +337,23 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
                                                    facade.GetTarget(adj_shortcut),
                                                    unpacked_shortcut);
 
+                    // Sometimes a "shortcut" is just an edge itself: this will not return a turn
                     if (unpacked_shortcut.size() < 2)
                     {
                         continue;
                     }
 
+                    // Unpack the data from the second edge (the first edge will be the edge
+                    // we're currently on), to use its geometry in calculating angle
                     const auto first_geometry_id =
                         facade.GetGeometryIndexForEdgeID(unpacked_shortcut[1].id);
                     std::vector<NodeID> first_geometry_vector;
                     facade.GetUncompressedGeometry(first_geometry_id, first_geometry_vector);
 
-                    auto sum_edge_weight = unpacked_shortcut[0].distance;
-
-                    auto turn_weight = sum_edge_weight - sum_node_weight;
+                    // EBE weight (the first edge in this shortcut) - EBN weight (calculated
+                    // above by summing the distance of the current node-based edge) = turn weight
+                    const auto sum_edge_weight = unpacked_shortcut[0].distance;
+                    const auto turn_weight = sum_edge_weight - sum_node_weight;
 
                     c_nodes.emplace(first_geometry_vector.front(), turn_weight);
                 }
@@ -661,9 +671,7 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
 
                     const auto encode_tile_point =
                         [&point_layer_writer, &edge, &id](const detail::FixedPoint &tile_point,
-                                                          const detail::TurnData &point_turn_data,
-                                                          std::int32_t &start_x,
-                                                          std::int32_t &start_y)
+                                                          const detail::TurnData &point_turn_data)
                     {
                         protozero::pbf_writer feature_writer(point_layer_writer,
                                                              util::vector_tile::FEATURE_TAG);
@@ -688,7 +696,7 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
                         {
                             protozero::packed_field_uint32 geometry(
                                 feature_writer, util::vector_tile::FEATURE_GEOMETRIES_TAG);
-                            encodePoint(tile_point, geometry, start_x, start_y);
+                            encodePoint(tile_point, geometry);
                         }
                     };
 
@@ -703,10 +711,7 @@ Status TilePlugin::HandleRequest(const api::TileParameters &parameters, std::str
 
                     for (const auto &individual_turn : edge_turn_data)
                     {
-                        std::int32_t start_x = 0;
-                        std::int32_t start_y = 0;
-
-                        encode_tile_point(tile_point, individual_turn, start_x, start_y);
+                        encode_tile_point(tile_point, individual_turn);
                     }
                 }
             }
