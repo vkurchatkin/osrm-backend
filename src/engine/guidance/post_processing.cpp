@@ -41,11 +41,17 @@ void print(const std::vector<RouteStep> &steps)
     int segment = 0;
     for (const auto &step : steps)
     {
-        std::cout << "\t[" << ++segment << "]: " << static_cast<int>(step.maneuver.instruction.type)
-                  << " " << static_cast<int>(step.maneuver.instruction.direction_modifier) << "  "
-                  << static_cast<int>(step.maneuver.waypoint_type) << " Duration: " << step.duration
-                  << " Distance: " << step.distance << " Geometry: " << step.geometry_begin << " "
-                  << step.geometry_end << " exit: " << step.maneuver.exit
+        const auto type = static_cast<int>(step.maneuver.instruction.type);
+        const auto modifier = static_cast<int>(step.maneuver.instruction.direction_modifier);
+
+        std::cout << "\t[" << ++segment << "]: " << type << " " << modifier << "  "
+                  << static_cast<int>(step.maneuver.waypoint_type) << " -- "
+                  << static_cast<int>(step.maneuver.instruction.lane_tupel.lanes_in_turn) << " "
+                  << static_cast<int>(
+                         step.maneuver.instruction.lane_tupel.first_lane_from_the_right)
+                  << " Duration: " << step.duration << " Distance: " << step.distance
+                  << " Geometry: " << step.geometry_begin << " " << step.geometry_end
+                  << " exit: " << step.maneuver.exit
                   << " Intersections: " << step.intersections.size() << " [";
 
         for (const auto &intersection : step.intersections)
@@ -698,7 +704,7 @@ std::vector<RouteStep> collapseTurns(std::vector<RouteStep> steps)
 // usually not be as relevant.
 void trimShortSegments(std::vector<RouteStep> &steps, LegGeometry &geometry)
 {
-
+    print(steps);
     if (steps.size() < 2 || geometry.locations.size() <= 2)
         return;
 

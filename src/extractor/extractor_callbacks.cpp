@@ -1,14 +1,16 @@
 #include "extractor/extraction_containers.hpp"
 #include "extractor/extraction_node.hpp"
 #include "extractor/extraction_way.hpp"
+#include "extractor/extractor_callbacks.hpp"
 
 #include "extractor/external_memory_node.hpp"
 #include "extractor/restriction.hpp"
 #include "util/for_each_pair.hpp"
+#include "util/guidance/turn_lanes.hpp"
 #include "util/simple_logger.hpp"
 
 #include <boost/optional/optional.hpp>
-#include "extractor/extractor_callbacks.hpp"
+#include <boost/numeric/conversion/cast.hpp>
 
 #include <osmium/osm.hpp>
 
@@ -28,6 +30,7 @@ ExtractorCallbacks::ExtractorCallbacks(ExtractionContainers &extraction_containe
     : external_memory(extraction_containers)
 {
     string_map[""] = 0;
+    lane_map[""] = 0;
 }
 
 /**
@@ -142,6 +145,27 @@ void ExtractorCallbacks::ProcessWay(const osmium::Way &input_way, const Extracti
     // Otherwise fetches the id based on the name and returns it without insertion.
 
     const constexpr auto MAX_STRING_LENGTH = 255u;
+    const auto requestId = [this](const std::string turn_lane_string) {
+        const auto &lane_map_iterator = lane_map.find(turn_lane_string);
+        if (lane_map.end() == lane_map_iterator)
+        {
+            LaneID turn_lane_id = boost::numeric_cast<LaneID>(external_memory.turn_lane_lengths.size());
+            auto turn_lane_length = std::min<unsigned>(MAX_STRING_LENGTH, turn_lane_string.size());
+            std::copy(turn_lane_string.c_str(),
+                      turn_lane_string.c_str() + turn_lane_length,
+                      std::back_inserter(external_memory.turn_lane_char_data));
+            external_memory.turn_lane_lengths.push_back(turn_lane_length);
+            lane_map.insert(std::make_pair(turn_lane_string, turn_lane_id));
+            return turn_lane_id;
+        }
+        else
+        {
+            return lane_map_iterator->second;
+        }
+    };
+
+    const auto turn_lane_id_forward = requestId(parsed_way.turn_lanes_forward);
+    const auto turn_lane_id_backward = requestId(parsed_way.turn_lanes_backward);
 
     // Get the unique identifier for the street name
     const auto string_map_iterator = string_map.find(parsed_way.name);
@@ -167,7 +191,8 @@ void ExtractorCallbacks::ProcessWay(const osmium::Way &input_way, const Extracti
                             (parsed_way.backward_speed > 0) &&
                             (TRAVEL_MODE_INACCESSIBLE != parsed_way.backward_travel_mode) &&
                             ((parsed_way.forward_speed != parsed_way.backward_speed) ||
-                             (parsed_way.forward_travel_mode != parsed_way.backward_travel_mode));
+                             (parsed_way.forward_travel_mode != parsed_way.backward_travel_mode) ||
+                             (turn_lane_id_forward != turn_lane_id_backward));
 
     std::transform(input_way.nodes().begin(), input_way.nodes().end(),
                    std::back_inserter(external_memory.used_node_id_list),
@@ -187,7 +212,7 @@ void ExtractorCallbacks::ProcessWay(const osmium::Way &input_way, const Extracti
                     OSMNodeID(first_node.ref()), OSMNodeID(last_node.ref()), name_id,
                     backward_weight_data, true, false, parsed_way.roundabout,
                     parsed_way.is_access_restricted, parsed_way.is_startpoint,
-                    parsed_way.backward_travel_mode, false, road_classification));
+                    parsed_way.backward_travel_mode, false, turn_lane_id_backward, road_classification));
             });
 
         external_memory.way_start_end_id_list.push_back(
@@ -206,7 +231,7 @@ void ExtractorCallbacks::ProcessWay(const osmium::Way &input_way, const Extracti
                     OSMNodeID(first_node.ref()), OSMNodeID(last_node.ref()), name_id,
                     forward_weight_data, true, !forward_only, parsed_way.roundabout,
                     parsed_way.is_access_restricted, parsed_way.is_startpoint,
-                    parsed_way.forward_travel_mode, split_edge, road_classification));
+                    parsed_way.forward_travel_mode, split_edge, turn_lane_id_forward, road_classification));
             });
         if (split_edge)
         {
@@ -218,7 +243,7 @@ void ExtractorCallbacks::ProcessWay(const osmium::Way &input_way, const Extracti
                         OSMNodeID(first_node.ref()), OSMNodeID(last_node.ref()), name_id,
                         backward_weight_data, false, true, parsed_way.roundabout,
                         parsed_way.is_access_restricted, parsed_way.is_startpoint,
-                        parsed_way.backward_travel_mode, true, road_classification));
+                        parsed_way.backward_travel_mode, true, turn_lane_id_backward, road_classification));
                 });
         }
 
