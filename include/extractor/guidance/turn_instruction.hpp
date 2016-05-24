@@ -6,8 +6,8 @@
 #include <boost/assert.hpp>
 
 #include "extractor/guidance/roundabout_type.hpp"
-#include "util/typedefs.hpp"
 #include "util/guidance/turn_lanes.hpp"
+#include "util/typedefs.hpp"
 
 namespace osrm
 {
@@ -55,20 +55,21 @@ const constexpr Enum EnterRotary = 12;                 // Enter a rotary
 const constexpr Enum EnterAndExitRotary = 13;          // Touching a rotary
 const constexpr Enum EnterRoundaboutIntersection = 14; // Entering a small Roundabout
 const constexpr Enum EnterAndExitRoundaboutIntersection = 15; // Touching a roundabout
+const constexpr Enum UseLane = 16; // No Turn, but you need to stay on a given lane!
 
 // Values below here are silent instructions
-const constexpr Enum NoTurn = 16;                // end of segment without turn/middle of a segment
-const constexpr Enum Suppressed = 17;            // location that suppresses a turn
-const constexpr Enum EnterRoundaboutAtExit = 18; // Entering a small Roundabout at a countable exit
-const constexpr Enum ExitRoundabout = 19;        // Exiting a small Roundabout
-const constexpr Enum EnterRotaryAtExit = 20;     // Enter A Rotary at a countable exit
-const constexpr Enum ExitRotary = 21;            // Exit a rotary
+const constexpr Enum NoTurn = 17;                // end of segment without turn/middle of a segment
+const constexpr Enum Suppressed = 18;            // location that suppresses a turn
+const constexpr Enum EnterRoundaboutAtExit = 19; // Entering a small Roundabout at a countable exit
+const constexpr Enum ExitRoundabout = 20;        // Exiting a small Roundabout
+const constexpr Enum EnterRotaryAtExit = 21;     // Enter A Rotary at a countable exit
+const constexpr Enum ExitRotary = 22;            // Exit a rotary
 const constexpr Enum EnterRoundaboutIntersectionAtExit =
-    22; // Entering a small Roundabout at a countable exit
-const constexpr Enum ExitRoundaboutIntersection = 23; // Exiting a small Roundabout
-const constexpr Enum StayOnRoundabout = 24; // Continue on Either a small or a large Roundabout
+    23; // Entering a small Roundabout at a countable exit
+const constexpr Enum ExitRoundaboutIntersection = 24; // Exiting a small Roundabout
+const constexpr Enum StayOnRoundabout = 25; // Continue on Either a small or a large Roundabout
 const constexpr Enum Sliproad =
-    25; // Something that looks like a ramp, but is actually just a small sliproad
+    26; // Something that looks like a ramp, but is actually just a small sliproad
 }
 
 // turn angle in 1.40625 degree -> 128 == 180 degree
@@ -79,7 +80,8 @@ struct TurnInstruction
                     const DirectionModifier::Enum direction_modifier = DirectionModifier::Straight,
                     const LaneTupel lane_tupel = {0, INVALID_LANEID})
         : type(type), direction_modifier(direction_modifier), lane_tupel(lane_tupel)
-    {}
+    {
+    }
 
     TurnType::Enum type : 5;
     DirectionModifier::Enum direction_modifier : 3;
