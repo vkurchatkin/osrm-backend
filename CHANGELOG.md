@@ -8,6 +8,11 @@
    - API:
     - paramater `annotate` was renamed to `annotations`.
 
+   - API:
+     - Support for destination signs. New member `destinations` in `RouteStep`, based on `destination` and `destination:ref`.
+   - Profile changes:
+     - `result.destinations` allows you to set a way's destinations
+
 # 5.2.0 RC1
    Changes from 5.1.0
 

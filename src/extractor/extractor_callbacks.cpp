@@ -7,8 +7,8 @@
 #include "util/for_each_pair.hpp"
 #include "util/simple_logger.hpp"
 
-#include <boost/optional/optional.hpp>
 #include "extractor/extractor_callbacks.hpp"
+#include <boost/optional/optional.hpp>
 
 #include <osmium/osm.hpp>
 
@@ -27,7 +27,7 @@ namespace extractor
 ExtractorCallbacks::ExtractorCallbacks(ExtractionContainers &extraction_containers)
     : external_memory(extraction_containers)
 {
-    string_map[""] = 0;
+    string_map[MapKey("", "")] = 0;
 }
 
 /**
@@ -143,19 +143,31 @@ void ExtractorCallbacks::ProcessWay(const osmium::Way &input_way, const Extracti
 
     const constexpr auto MAX_STRING_LENGTH = 255u;
 
-    // Get the unique identifier for the street name
-    const auto string_map_iterator = string_map.find(parsed_way.name);
+    // Get the unique identifier for the street name and destination
+    const auto string_map_iterator =
+        string_map.find(MapKey(parsed_way.name, parsed_way.destinations));
     unsigned name_id = external_memory.name_lengths.size();
     if (string_map.end() == string_map_iterator)
     {
         auto name_length = std::min<unsigned>(MAX_STRING_LENGTH, parsed_way.name.size());
+        auto destinations_length =
+            std::min<unsigned>(MAX_STRING_LENGTH, parsed_way.destinations.size());
 
-        external_memory.name_char_data.reserve(name_id + name_length);
+        external_memory.name_char_data.reserve(name_id + name_length + destinations_length);
+
         std::copy(parsed_way.name.c_str(), parsed_way.name.c_str() + name_length,
                   std::back_inserter(external_memory.name_char_data));
 
+        std::copy(parsed_way.destinations.c_str(),
+                  parsed_way.destinations.c_str() + destinations_length,
+                  std::back_inserter(external_memory.name_char_data));
+
         external_memory.name_lengths.push_back(name_length);
-        string_map.insert(std::make_pair(parsed_way.name, name_id));
+        external_memory.name_lengths.push_back(destinations_length);
+
+        auto k = MapKey{parsed_way.name, parsed_way.destinations};
+        auto v = MapVal{name_id};
+        string_map.emplace(std::move(k), std::move(v));
     }
     else
     {
