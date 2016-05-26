@@ -14,6 +14,42 @@ namespace extractor
 namespace guidance
 {
 
+namespace detail
+{
+
+DirectionModifier::Enum getMatchingModifier(const std::string &tag)
+{
+    const constexpr char *tag_by_modifier[] = {"reverse",    "sharp_right", "right", "slight_right",
+                                               "through",    "slight_left", "left",  "sharp_left",
+                                               "merge_left", "merge_right"};
+    std::cout << "Tag: " << tag << std::endl;
+    const auto index =
+        std::distance(tag_by_modifier, std::find(tag_by_modifier, tag_by_modifier + 10, tag));
+
+    const constexpr DirectionModifier::Enum modifiers[] = {
+        DirectionModifier::UTurn,      DirectionModifier::SharpRight,
+        DirectionModifier::Right,      DirectionModifier::SlightRight,
+        DirectionModifier::Straight,   DirectionModifier::SlightLeft,
+        DirectionModifier::Left,       DirectionModifier::SharpLeft,
+        DirectionModifier::SlightLeft, DirectionModifier::SlightRight};
+
+    BOOST_ASSERT(index < 10);
+    return modifiers[index];
+}
+
+typename Intersection::iterator findBestMatch(const std::string &tag, Intersection &intersection)
+{
+    const constexpr double idealized_turn_angles[] = {0, 35, 90, 135, 180, 225, 270, 315};
+    const auto idealized_angle = idealized_turn_angles[getMatchingModifier(tag)];
+    return std::min_element(intersection.begin(), intersection.end(),
+                            [idealized_angle](const ConnectedRoad &lhs, const ConnectedRoad &rhs) {
+                                return angularDeviation(idealized_angle, lhs.turn.angle) <
+                                       angularDeviation(idealized_angle, rhs.turn.angle);
+                                ;
+                            });
+}
+} // namespace detail
+
 bool TurnLaneMatcher::TurnLaneData::operator<(const TurnLaneMatcher::TurnLaneData &other) const
 {
     if (from < other.from)
@@ -301,7 +337,7 @@ TurnLaneMatcher::LaneDataVector TurnLaneMatcher::handleNoneValueAtSimpleTurn(
     {
         if (lane_data[index].tag == "none")
         {
-            bool print = false;
+            bool print = true;
             // we have to create multiple turns
             if (connection_count > lane_data.size())
             {
@@ -447,12 +483,16 @@ TurnLaneMatcher::LaneDataVector TurnLaneMatcher::handleNoneValueAtSimpleTurn(
                             lane_data[index].to = lane_data[index].from;
                         }
                     }
+                    else if (has_through &&
+                             (lane_data.size() == 1 || lane_data[index + 1].tag != "through"))
+                    {
+                        lane_data[index].tag = "through";
+                    }
                 }
                 else if (index + 1 == lane_data.size())
                 {
-                    if (has_left &&
-                        (lane_data.size() == 1 || (lane_data[index - 1].tag != "sharp_left" &&
-                                                   lane_data[index - 1].tag != "left")))
+                    if (has_left && ((lane_data[index - 1].tag != "sharp_left" &&
+                                      lane_data[index - 1].tag != "left")))
                     {
                         lane_data[index].tag = "left";
                         if (lane_data[index - 1].tag == "through")
@@ -461,6 +501,10 @@ TurnLaneMatcher::LaneDataVector TurnLaneMatcher::handleNoneValueAtSimpleTurn(
                             // turning left through a possible through lane is not possible
                             lane_data[index].from = lane_data[index].to;
                         }
+                    }
+                    else if (has_through && lane_data[index - 1].tag != "through")
+                    {
+                        lane_data[index].tag = "through";
                     }
                 }
                 else
@@ -488,8 +532,8 @@ TurnLaneMatcher::LaneDataVector TurnLaneMatcher::handleNoneValueAtSimpleTurn(
 
                 std::cout << "Output" << std::endl;
                 for (auto tag : lane_data)
-                    std::cout << "Lane Information: " << tag.tag << " " << tag.from << "-" << tag.to
-                              << std::endl;
+                    std::cout << "Lane Information: " << tag.tag << " " << (int)tag.from << "-"
+                              << (int)tag.to << std::endl;
 
                 for (const auto &turn : intersection)
                 {
@@ -589,8 +633,9 @@ bool TurnLaneMatcher::isSimpleIntersection(const LaneDataVector &lane_data,
     return false;
 }
 
-LaneDataVector TurnLaneMatchertrimToRelevantLaneData(const LaneDataVector &turn_lane_data,
-                                                     const Intersection &intersection) const
+TurnLaneMatcher::LaneDataVector
+TurnLaneMatcher::trimToRelevantLaneData(LaneDataVector turn_lane_data,
+                                        const Intersection &intersection) const
 {
     BOOST_ASSERT(turn_lane_data.size() >
                  std::count_if(intersection.begin(), intersection.end(),
@@ -599,16 +644,16 @@ LaneDataVector TurnLaneMatchertrimToRelevantLaneData(const LaneDataVector &turn_
     /*
      * Segregated Intersections can provide turn lanes for turns that are not yet possible.
      * The straightforward example would be coming up to the following situation:
-     *         (1)            (2)
-     *        | A |          | A |
-     *        | | |          | ^ |
-     *        | v |          | | |
-     * -------    -----------     ------
+     *         (1)             (2)
+     *        | A |           | A |
+     *        | | |           | ^ |
+     *        | v |           | | |
+     * -------     -----------     ------
      *  B ->-^                        B
-     * -------    -----------     ------
+     * -------     -----------     ------
      *  B ->-v                        B
-     * ------     -----------     ------
-     *       | A |           | A |
+     * -------     -----------     ------
+     *        | A |           | A |
      *
      * Traveling on road B, we have to pass A at (1) to turn left onto A at (2). The turn
      * lane itself may only be specified prior to (1) and/or could be repeated between (1)
@@ -616,6 +661,8 @@ LaneDataVector TurnLaneMatchertrimToRelevantLaneData(const LaneDataVector &turn_
      * case left) turn lane as if it were to continue straight onto the intersection and
      * look back between (1) and (2) to make sure we find the correct lane for the left-turn.
      */
+
+    // Check whether we are looking at a missing left, or a missing right turn possibility
 }
 
 Intersection TurnLaneMatcher::simpleMatchTuplesToTurns(Intersection intersection,
@@ -625,6 +672,10 @@ Intersection TurnLaneMatcher::simpleMatchTuplesToTurns(Intersection intersection
     const auto possible_entries =
         std::count_if(intersection.begin(), intersection.end(),
                       [](const ConnectedRoad &road) { return road.entry_allowed; });
+
+    for (auto entry : lane_data)
+        if (entry.tag == "none")
+            return intersection;
 
     // Needs to handle u-turn edge, sort lanes accordingly
     std::cout << "Lane Data: " << lane_data.size() << " "
@@ -653,6 +704,8 @@ Intersection TurnLaneMatcher::simpleMatchTuplesToTurns(Intersection intersection
                 intersection[road_index].turn.instruction.type = TurnType::UseLane;
             std::cout << "Assigned: " << lane_data[valid_turn].tag << " to "
                       << toString(intersection[road_index]) << std::endl;
+            BOOST_ASSERT(detail::findBestMatch(lane_data[valid_turn].tag, intersection) ==
+                         intersection.begin() + road_index);
             ++valid_turn;
         }
     }
