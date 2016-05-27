@@ -253,7 +253,7 @@ find_package(Boost 1.49.0 REQUIRED COMPONENTS ${BOOST_COMPONENTS})
 # collect a subset of the boost libraries needed
 # by libosrm
 foreach(lib ${Boost_LIBRARIES})
-  if(lib MATCHES filesystem OR lib MATCHES thread OR lib MATCHES iostreams OR lib MATCHES system)
+  if(lib MATCHES date_time OR lib MATCHES filesystem OR lib MATCHES thread OR lib MATCHES iostreams OR lib MATCHES system)
      list(APPEND BOOST_ENGINE_LIBRARIES "${lib}")
   endif()
 endforeach(lib)
